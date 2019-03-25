@@ -211,6 +211,7 @@ module powerbi.extensibility.visual {
         private viewModel: ViewModel;
         private fieldName: string;
         private timers: any;
+        private lastValue: any;
 
         constructor(options: VisualConstructorOptions) {
             this.host = options.host;
@@ -270,7 +271,7 @@ module powerbi.extensibility.visual {
          }
          
         public update(options: VisualUpdateOptions) {
-
+            debugger;
             if (isDataReady(options) == false) {
                 return;
             }
@@ -312,15 +313,29 @@ module powerbi.extensibility.visual {
             //Check if field name has changed and update accordingly
             if (this.fieldName != options.dataViews[0].categorical.categories[0].source.displayName) {
                 this.fieldName = options.dataViews[0].categorical.categories[0].source.displayName;
-                this.resetAnimation(this.visualSettings.transitionSettings.autoStart);
+                this.resetAnimation(this.visualSettings.transitionSettings.autoStart,
+                    this.visualSettings.transitionSettings.loop);
             }
            
-            //Change title            
-            if (this.visualSettings.captionSettings.show) {   
-                
-                if (this.status != Status.Play) {
-                    this.updateCaption(this.fieldName);
-                }                        
+            //Change title 
+            if (this.status != Status.Play) {
+                if (this.visualSettings.captionSettings.show)
+                    this.updateCaption(this.visualDataPoints[this.visualDataPoints.length - 1].category);                
+            } 
+
+            if (this.lastValue != this.visualDataPoints[this.visualDataPoints.length - 1].category) {
+                 
+                this.lastSelected = this.visualDataPoints.length - 1;
+                this.lastValue = this.visualDataPoints[this.visualDataPoints.length - 1].category;
+                this.resetAnimation(this.visualSettings.transitionSettings.autoStart,
+                    this.visualSettings.transitionSettings.loop);
+                //this.selectionManager.select(this.visualDataPoints[this.lastSelected].selectionId);
+                if (this.visualSettings.captionSettings.show)
+                    this.updateCaption(this.visualDataPoints[this.visualDataPoints.length - 1].category); 
+                this.status = Status.Pause;
+            }
+            if (this.visualSettings.captionSettings.show) {                   
+                                       
 
                 let node: any = <SVGElement>this.svg.select("#label").node();
                 let TextBBox = node.getBBox();
@@ -350,34 +365,52 @@ module powerbi.extensibility.visual {
 
             //Update selection if bookmarked was clicked
             let ids = this.selectionManager.getSelectionIds() as ISelectionId[];
+            let idFound = false;
             if(ids.length == 1 && (this.status != Status.Play)) { //Number of selected ids should be 1 and status different than play
                 this.visualDataPoints.forEach((dataPoint, index) => {
                     if(ids[0].includes(dataPoint.selectionId)) {
                         this.lastSelected = index;  
                         this.pauseAnimation();
+                        idFound = true;
                         this.step(0);
                         return;
                     }
                 });
             }
+            if (!idFound && (this.status != Status.Play)) {
+                if (this.visualDataPoints && this.lastSelected != -1) {
+                    const self = this;
+                    this.selectionManager.clear().then(_ => self.selectionManager.select(self.visualDataPoints[self.lastSelected].selectionId));
+                }
+            };
         }
 
-        public resetAnimation(autoStart : boolean) {
-            this.lastSelected = -1;
+        public resetAnimation(autoStart: boolean, doloop: boolean =false) {
+            debugger;
+            console.log('reset animation');
+			//console.log(this.visualDataPoints);
+			//console.log(this.viewModel);
+            //this.lastSelected = this.visualDataPoints ? this.visualDataPoints.length - 1 : -1;
+            //const self = this;
+            //if (this.visualDataPoints && this.lastSelected>-1)
+            //    this.selectionManager.clear().then(_ => self.selectionManager.select(self.visualDataPoints[self.lastSelected].selectionId));
 
             if (autoStart) {
-                this.svg.selectAll("#play, #next, #previous").attr("opacity", "0.3");
+                this.svg.selectAll("#play").attr("opacity",  "0.3");
+                this.svg.selectAll("#next, #previous").attr("opacity", doloop ? "1" : "0.3");
                 this.svg.selectAll("#stop, #pause").attr("opacity", "1");
             } else {
                 //Setup initial state of buttons
-                this.svg.selectAll("#previous, #pause").attr("opacity", "0.3"); 
+                this.svg.selectAll("#pause").attr("opacity", "0.3");
+                this.svg.selectAll("#previous").attr("opacity", doloop?"1":"0.3"); 
                 this.svg.selectAll("#play, #stop, #next").attr("opacity", "1"); 
             }
         }
 
-        public playAnimation() {              
+        public playAnimation() { 
+            debugger;
             if (this.status == Status.Play) return;
-   
+
             this.svg.selectAll("#play, #next, #previous").attr("opacity", "0.3");
             this.svg.selectAll("#stop, #pause").attr("opacity", "1");
 
@@ -394,6 +427,7 @@ module powerbi.extensibility.visual {
             }
 
             //replay or stop after one cycle
+													   
             let stopAnimationTimer = setTimeout(() => {
                 if(this.visualSettings.transitionSettings.loop) {
                     this.status = Status.Stop;
@@ -402,22 +436,26 @@ module powerbi.extensibility.visual {
                 } else {
                     this.stopAnimation();
                 }
-            }, (this.viewModel.dataPoints.length - this.lastSelected) * timeInterval); 
+            }, (this.viewModel.dataPoints.length-1==this.lastSelected)?0:(this.viewModel.dataPoints.length - this.lastSelected) * timeInterval); 
             this.timers.push(stopAnimationTimer);
             this.status = Status.Play;
         }                
 
         public stopAnimation() {
-            if (this.status == Status.Stop) return; 
+            debugger;
+            if (this.status == Status.Stop ) return; 
             
             this.svg.selectAll("#pause, #stop, #next, #previous").attr("opacity", "0.3");
             this.svg.selectAll("#play").attr("opacity", "1");
             for (let i of this.timers) {
                 clearTimeout(i);
             }
-            this.updateCaption(this.fieldName);
-            this.lastSelected = -1;
-            this.selectionManager.clear();
+			
+            this.lastSelected = this.viewModel.dataPoints.length -1;			
+            this.updateCaption(this.viewModel.dataPoints[this.lastSelected].category);
+            const self = this;
+            this.selectionManager.clear().then(_=>
+                self.selectionManager.select(self.viewModel.dataPoints[self.lastSelected].selectionId));
             this.status = Status.Stop;
         }
 
@@ -432,20 +470,24 @@ module powerbi.extensibility.visual {
             this.status = Status.Pause;
         }
 
-        public step(step: number) {
-            if (this.status == Status.Play || this.status == Status.Stop) return;                                       
+        public step(step: number, reselect:boolean=true) {
+            if (this.status == Status.Play || this.status == Status.Stop) return; 
+            let nextStep = this.lastSelected + step;
+            if (this.visualSettings.transitionSettings.loop)
+                nextStep = (this.viewModel.dataPoints.length+nextStep) % this.viewModel.dataPoints.length;
 
             //Check if selection is within limits
-            if ((this.lastSelected + step) < 0 || (this.lastSelected + step) > (this.viewModel.dataPoints.length-1)) return;
+            if ((nextStep) < 0 || (nextStep) > (this.viewModel.dataPoints.length-1)) return;
 
-            let previousButtonOpacity = (this.lastSelected + step) == 0 ? 0.3 : 1;
-            let nextButtonOpacity = (this.lastSelected + step) == (this.viewModel.dataPoints.length-1) ? 0.3 : 1;
+            let previousButtonOpacity = ((nextStep) == 0 && !this.visualSettings.transitionSettings.loop)? 0.3 : 1;
+            let nextButtonOpacity = ((nextStep) == (this.viewModel.dataPoints.length - 1) && !this.visualSettings.transitionSettings.loop )? 0.3 : 1;
 
             this.svg.selectAll("#previous").attr("opacity", previousButtonOpacity);
             this.svg.selectAll("#next").attr("opacity", nextButtonOpacity);
 
-            this.lastSelected = this.lastSelected + step;
-            this.selectionManager.select(this.viewModel.dataPoints[this.lastSelected].selectionId);
+            this.lastSelected = nextStep;
+            const self = this;
+            this.selectionManager.clear().then(_ => self.selectionManager.select(self.visualDataPoints[self.lastSelected].selectionId));
             this.updateCaption(this.viewModel.dataPoints[this.lastSelected].category);
             this.status = Status.Pause;
         }
